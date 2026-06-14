@@ -40,8 +40,24 @@ interface NewTaskForm {
   files: File[];
 }
 
+const collectCategoryNames = (ids: string[], cats: StandardCategory[]): string[] => {
+  const names = new Set<string>();
+  const traverse = (list: StandardCategory[]) => {
+    for (const cat of list) {
+      if (ids.includes(cat.id)) {
+        names.add(cat.name);
+      }
+      if (cat.children && cat.children.length > 0) {
+        traverse(cat.children);
+      }
+    }
+  };
+  traverse(cats);
+  return Array.from(names);
+};
+
 export default function Tasks() {
-  const { checkTasks, standardCategories } = useAppStore();
+  const { checkTasks, standardCategories, addCheckTask } = useAppStore();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -162,6 +178,19 @@ export default function Tasks() {
   };
 
   const handleCreate = () => {
+    const categoryNames = collectCategoryNames(form.selectedStandards, standardCategories);
+    const baseFields = form.files.length * 10 + Math.floor(Math.random() * 30);
+    const totalFields = Math.max(20, baseFields);
+
+    addCheckTask({
+      name: form.name,
+      projectName: form.projectName,
+      description: form.description,
+      standardCategories: categoryNames,
+      status: 'pending',
+      totalFields,
+    });
+
     setIsModalOpen(false);
   };
 

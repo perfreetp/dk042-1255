@@ -32,7 +32,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useAppStore } from '@/store';
-import type { IssueType } from '@/types';
+import type { Issue, IssueType, IssueSeverity, IssueStatus } from '@/types';
 
 type TimeRange = '7d' | '30d' | 'quarter' | 'year' | 'custom';
 
@@ -45,6 +45,66 @@ const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   valuerange: '取值范围',
   other: '其他',
 };
+
+const SEVERITY_LABELS: Record<IssueSeverity, string> = {
+  high: '严重',
+  medium: '中等',
+  low: '轻微',
+};
+
+const STATUS_LABELS: Record<IssueStatus, string> = {
+  open: '待处理',
+  rectifying: '整改中',
+  resolved: '已解决',
+  falsepositive: '误报',
+};
+
+interface ExportRow {
+  taskName: string;
+  projectName: string;
+  fieldName: string;
+  tableName: string;
+  issueType: string;
+  severity: string;
+  description: string;
+  suggestion: string;
+  standardName: string;
+  status: string;
+  createdAt: string;
+}
+
+function formatDateForFilename(date: Date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}${m}${d}`;
+}
+
+function downloadBlob(content: BlobPart, filename: string, mimeType: string): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function escapeHtml(value: string): string {
+  const div = document.createElement('div');
+  div.textContent = value ?? '';
+  return div.innerHTML;
+}
+
+function escapeCsv(value: string): string {
+  const v = value ?? '';
+  if (v.includes(',') || v.includes('"') || v.includes('\n') || v.includes('\r')) {
+    return `"${v.replace(/"/g, '""')}"`;
+  }
+  return v;
+}
 
 function CircularProgress({
   percentage,
@@ -115,7 +175,14 @@ function getMedalIcon(rank: number) {
 }
 
 export default function Analytics() {
-  const { checkTasks, issues, rectificationTasks } = useAppStore();
+  const {
+    checkTasks,
+    issues,
+    rectificationTasks,
+    currentTaskId,
+    dataFields,
+    dataStandards,
+  } = useAppStore();
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -202,10 +269,196 @@ export default function Analytics() {
 
   const handleExport = () => {
     setIsExporting(true);
+
+    const dateStr = formatDateForFilename();
+
+    const filteredIssues: Issue[] = exportScope === 'all'
+      ? [...issues]
+      : issues.filter((issue) => issue.taskId === currentTaskId);
+
+    const taskMap = new Map(checkTasks.map((t) => [t.id, t]));
+    const fieldMap = new Map(dataFields.map((f) => [f.id, f]));
+
+    const rows: ExportRow[] = filteredIssues.map((issue) => {
+      const task = taskMap.get(issue.taskId);
+      const field = fieldMap.get(issue.fieldId);
+      return {
+        taskName: task?.name ?? '-',
+        projectName: task?.projectName ?? '-',
+        fieldName: issue.fieldName ?? '-',
+        tableName: issue.tableName ?? field?.tableName ?? '-',
+        issueType: ISSUE_TYPE_LABELS[issue.type] ?? issue.type,
+        severity: SEVERITY_LABELS[issue.severity] ?? issue.severity,
+        description: issue.description ?? '-',
+        suggestion: issue.suggestion ?? '-',
+        standardName: issue.standardName ?? '-',
+        status: STATUS_LABELS[issue.status] ?? issue.status,
+        createdAt: issue.createdAt ?? '-',
+      };
+    });
+
+    const headers = [
+      '检查任务',
+      '所属项目',
+      '字段名',
+      '所属表',
+      '问题类型',
+      '严重程度',
+      '问题描述',
+      '整改建议',
+      '对应标准',
+      '状态',
+      '创建时间',
+    ];
+
+    if (exportFormat === 'excel') {
+      let html =
+        '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+        'xmlns:x="urn:schemas-microsoft-com:office:excel" ' +
+        'xmlns="http://www.w3.org/TR/REC-html40">' +
+        '<head><meta charset="UTF-8"/>' +
+        '<!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>' +
+        '<x:Name>检查明细</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions>' +
+        '</x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->' +
+        '<style>' +
+        'table { border-collapse: collapse; }' +
+        'th, td { border: 1px solid #999; padding: 6px 10px; font-size: 12px; }' +
+        'th { background-color: #2d79c1; color: #fff; font-weight: bold; }' +
+        'tr:nth-child(even) td { background-color: #f5f9ff; }' +
+        '</style></head><body>' +
+        '<h2 style="color:#1e3a5f;">数据标准检查明细</h2>' +
+        `<p style="color:#666;">导出时间：${new Date().toLocaleString()}　导出范围：${exportScope === 'all' ? '全部数据' : '当前项目'}　共 ${rows.length} 条记录</p>` +
+        '<table><thead><tr>';
+      headers.forEach((h) => {
+        html += `<th>${escapeHtml(h)}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach((row) => {
+        html += '<tr>';
+        html += `<td>${escapeHtml(row.taskName)}</td>`;
+        html += `<td>${escapeHtml(row.projectName)}</td>`;
+        html += `<td>${escapeHtml(row.fieldName)}</td>`;
+        html += `<td>${escapeHtml(row.tableName)}</td>`;
+        html += `<td>${escapeHtml(row.issueType)}</td>`;
+        html += `<td>${escapeHtml(row.severity)}</td>`;
+        html += `<td>${escapeHtml(row.description)}</td>`;
+        html += `<td>${escapeHtml(row.suggestion)}</td>`;
+        html += `<td>${escapeHtml(row.standardName)}</td>`;
+        html += `<td>${escapeHtml(row.status)}</td>`;
+        html += `<td>${escapeHtml(row.createdAt)}</td>`;
+        html += '</tr>';
+      });
+      html += '</tbody></table></body></html>';
+      downloadBlob(html, `数据标准检查明细_${dateStr}.xls`, 'application/vnd.ms-excel');
+    } else if (exportFormat === 'csv') {
+      const csvLines: string[] = [];
+      csvLines.push(headers.map(escapeCsv).join(','));
+      rows.forEach((row) => {
+        const line = [
+          row.taskName,
+          row.projectName,
+          row.fieldName,
+          row.tableName,
+          row.issueType,
+          row.severity,
+          row.description,
+          row.suggestion,
+          row.standardName,
+          row.status,
+          row.createdAt,
+        ].map(escapeCsv).join(',');
+        csvLines.push(line);
+      });
+      const csvContent = '\uFEFF' + csvLines.join('\r\n');
+      downloadBlob(csvContent, `数据标准检查明细_${dateStr}.csv`, 'text/csv;charset=utf-8');
+    } else {
+      let html =
+        '<!DOCTYPE html>' +
+        '<html lang="zh-CN"><head><meta charset="UTF-8"/>' +
+        '<title>数据标准检查明细</title>' +
+        '<style>' +
+        '* { box-sizing: border-box; margin: 0; padding: 0; }' +
+        'body { font-family: "Microsoft YaHei", Arial, sans-serif; padding: 40px; color: #333; background: #fff; }' +
+        '.header { margin-bottom: 30px; border-bottom: 2px solid #2d79c1; padding-bottom: 20px; }' +
+        '.header h1 { color: #1e3a5f; font-size: 24px; margin-bottom: 10px; }' +
+        '.header .meta { color: #666; font-size: 14px; line-height: 1.8; }' +
+        '.summary { display: flex; gap: 20px; margin-bottom: 30px; }' +
+        '.summary-card { flex: 1; padding: 16px 20px; background: #f5f9ff; border-radius: 8px; border-left: 4px solid #2d79c1; }' +
+        '.summary-card .label { color: #666; font-size: 13px; margin-bottom: 6px; }' +
+        '.summary-card .value { color: #1e3a5f; font-size: 22px; font-weight: bold; }' +
+        'table { width: 100%; border-collapse: collapse; margin-top: 10px; }' +
+        'th, td { border: 1px solid #d0d7de; padding: 10px 12px; font-size: 13px; text-align: left; vertical-align: top; }' +
+        'th { background: linear-gradient(135deg, #1e3a5f, #2d79c1); color: #fff; font-weight: 600; }' +
+        'tbody tr:nth-child(even) { background: #f8fafc; }' +
+        'tbody tr:hover { background: #eef6ff; }' +
+        '.severity-high { color: #dc2626; font-weight: 600; }' +
+        '.severity-medium { color: #d97706; font-weight: 600; }' +
+        '.severity-low { color: #16a34a; font-weight: 600; }' +
+        '.status-open { color: #dc2626; }' +
+        '.status-rectifying { color: #d97706; }' +
+        '.status-resolved { color: #16a34a; }' +
+        '.status-falsepositive { color: #6b7280; }' +
+        '.tip { margin-top: 30px; padding: 14px 18px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; color: #92400e; font-size: 13px; }' +
+        '.tip strong { color: #78350f; }' +
+        'footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px; text-align: center; }' +
+        '@media print { body { padding: 20px; } .no-print { display: none; } }' +
+        '</style></head><body>' +
+        '<div class="no-print" style="margin-bottom:20px;">' +
+        '<button onclick="window.print()" style="padding:10px 20px;background:#2d79c1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">🖨️ 打印 / 导出为 PDF</button>' +
+        '</div>' +
+        '<div class="header">' +
+        '<h1>📋 数据标准检查明细报告</h1>' +
+        '<div class="meta">' +
+        `<div>导出时间：${new Date().toLocaleString()}</div>` +
+        `<div>导出范围：${exportScope === 'all' ? '全部任务数据' : '当前选中任务'}</div>` +
+        '</div></div>' +
+        '<div class="summary">' +
+        `<div class="summary-card"><div class="label">问题总数</div><div class="value">${rows.length}</div></div>` +
+        `<div class="summary-card"><div class="label">严重问题</div><div class="value" style="color:#dc2626;">${rows.filter((r) => r.severity === '严重').length}</div></div>` +
+        `<div class="summary-card"><div class="label">已解决</div><div class="value" style="color:#16a34a;">${rows.filter((r) => r.status === '已解决').length}</div></div>` +
+        `<div class="summary-card"><div class="label">待处理</div><div class="value" style="color:#d97706;">${rows.filter((r) => r.status === '待处理').length}</div></div>` +
+        '</div>' +
+        '<h3 style="color:#1e3a5f;margin-bottom:12px;">详细检查结果</h3>' +
+        '<table><thead><tr>';
+      headers.forEach((h) => {
+        html += `<th>${escapeHtml(h)}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+      rows.forEach((row) => {
+        const sevClass =
+          row.severity === '严重' ? 'severity-high' :
+          row.severity === '中等' ? 'severity-medium' : 'severity-low';
+        const staClass =
+          row.status === '待处理' ? 'status-open' :
+          row.status === '整改中' ? 'status-rectifying' :
+          row.status === '已解决' ? 'status-resolved' : 'status-falsepositive';
+        html += '<tr>';
+        html += `<td>${escapeHtml(row.taskName)}</td>`;
+        html += `<td>${escapeHtml(row.projectName)}</td>`;
+        html += `<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(row.fieldName)}</code></td>`;
+        html += `<td>${escapeHtml(row.tableName)}</td>`;
+        html += `<td>${escapeHtml(row.issueType)}</td>`;
+        html += `<td class="${sevClass}">${escapeHtml(row.severity)}</td>`;
+        html += `<td>${escapeHtml(row.description)}</td>`;
+        html += `<td>${escapeHtml(row.suggestion)}</td>`;
+        html += `<td>${escapeHtml(row.standardName)}</td>`;
+        html += `<td class="${staClass}">${escapeHtml(row.status)}</td>`;
+        html += `<td>${escapeHtml(row.createdAt)}</td>`;
+        html += '</tr>';
+      });
+      html += '</tbody></table>' +
+        '<div class="tip">' +
+        '<strong>💡 提示：</strong>请点击上方"打印 / 导出为 PDF"按钮，在打印对话框中选择"另存为 PDF"，即可生成 PDF 格式文件。' +
+        '</div>' +
+        `<footer>数据标准管理平台 · 自动生成于 ${new Date().toLocaleString()} · 共 ${rows.length} 条记录</footer>` +
+        '</body></html>';
+      downloadBlob(html, `数据标准检查明细_${dateStr}.html`, 'text/html;charset=utf-8');
+    }
+
     setTimeout(() => {
       setIsExporting(false);
       setShowExportModal(false);
-    }, 1500);
+    }, 1000);
   };
 
   return (

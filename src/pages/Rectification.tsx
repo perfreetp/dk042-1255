@@ -338,13 +338,19 @@ function TaskDetailModal({
   task,
   onClose,
   onStatusChange,
+  onSubmitRectification,
+  onApproveRectification,
+  onRejectRectification,
 }: {
   task: RectificationTask;
   onClose: () => void;
   onStatusChange: (taskId: string, status: RectificationStatus) => void;
+  onSubmitRectification: (taskId: string, result: string) => void;
+  onApproveRectification: (taskId: string) => void;
+  onRejectRectification: (taskId: string) => void;
 }) {
   const [showResultInput, setShowResultInput] = useState(false);
-  const [resultText, setResultText] = useState('');
+  const [resultText, setResultText] = useState(task.result || '');
   const issue = useAppStore((s) => s.issues.find((i) => i.id === task.issueId));
   const overdue = isOverdue(task.deadline) && task.status !== 'approved';
 
@@ -354,18 +360,18 @@ function TaskDetailModal({
         setShowResultInput(true);
         return;
       }
-      onStatusChange(task.id, 'submitted');
+      onSubmitRectification(task.id, resultText.trim());
       onClose();
     }
   };
 
   const handleApprove = () => {
-    onStatusChange(task.id, 'approved');
+    onApproveRectification(task.id);
     onClose();
   };
 
   const handleReject = () => {
-    onStatusChange(task.id, 'rejected');
+    onRejectRectification(task.id);
     onClose();
   };
 
@@ -457,7 +463,7 @@ function TaskDetailModal({
             </div>
           )}
 
-          {task.result && (
+          {task.result && task.status !== 'in_progress' && (
             <div className="mb-6">
               <h4 className="text-sm font-semibold text-gray-800 mb-2">整改结果</h4>
               <div className="bg-green-50 rounded-lg p-4 text-sm text-gray-700 leading-relaxed">
@@ -466,7 +472,7 @@ function TaskDetailModal({
             </div>
           )}
 
-          {task.status === 'in_progress' && showResultInput && (
+          {task.status === 'in_progress' && (
             <div className="mb-6">
               <h4 className="text-sm font-semibold text-gray-800 mb-2">整改结果</h4>
               <textarea
@@ -723,7 +729,14 @@ function AssignModal({
 }
 
 export default function Rectification() {
-  const { rectificationTasks, updateRectificationStatus, createRectificationTask } = useAppStore();
+  const {
+    rectificationTasks,
+    updateRectificationStatus,
+    createRectificationTask,
+    submitRectification,
+    approveRectification,
+    rejectRectification,
+  } = useAppStore();
   const [selectedTask, setSelectedTask] = useState<RectificationTask | null>(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
 
@@ -859,6 +872,9 @@ export default function Rectification() {
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
           onStatusChange={handleStatusChange}
+          onSubmitRectification={submitRectification}
+          onApproveRectification={approveRectification}
+          onRejectRectification={rejectRectification}
         />
       )}
 

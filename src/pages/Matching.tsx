@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react';
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react';
 import {
   Search,
   Upload,
@@ -174,7 +174,15 @@ function StatusBadge({ status }: { status: DataField['matchStatus'] }) {
 }
 
 export default function Matching() {
-  const { dataFields, dataStandards, standardCategories, confirmFieldMatch, currentTaskId } = useAppStore();
+  const {
+    dataFields,
+    dataStandards,
+    standardCategories,
+    confirmFieldMatch,
+    currentTaskId,
+    checkTasks,
+    setCurrentTaskId,
+  } = useAppStore();
 
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set(['cat-2', 'cat-3']));
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<Set<string>>(new Set());
@@ -182,13 +190,41 @@ export default function Matching() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(dataFields[0]?.id ?? null);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const currentTask = useMemo(() => {
+    return checkTasks.find((t) => t.id === currentTaskId) ?? null;
+  }, [checkTasks, currentTaskId]);
 
   const taskFields = useMemo(() => {
     return dataFields.filter((f) => f.taskId === currentTaskId);
   }, [dataFields, currentTaskId]);
+
+  const selectedCategoryLeafNames = useMemo(() => {
+    const leafNames = new Set<string>();
+    const collectLeafNames = (cats: StandardCategory[]) => {
+      for (const cat of cats) {
+        if (selectedCategoryIds.has(cat.id)) {
+          const getLeaves = (c: StandardCategory): string[] => {
+            if (!c.children || c.children.length === 0) {
+              return [c.name];
+            }
+            return c.children.flatMap(getLeaves);
+          };
+          getLeaves(cat).forEach((name) => leafNames.add(name));
+        }
+        if (cat.children) {
+          collectLeafNames(cat.children);
+        }
+      }
+    };
+    collectLeafNames(standardCategories);
+    return leafNames;
+  }, [selectedCategoryIds, standardCategories]);
+
+  const hasCategoryFilter = selectedCategoryLeafNames.size > 0;
 
   const filteredAndSortedFields = useMemo(() => {
     let fields = [...taskFields];
@@ -217,13 +253,34 @@ export default function Matching() {
     return fields;
   }, [taskFields, statusFilter, sortOrder, searchTerm]);
 
+  const fieldsWithCategoryInfo = useMemo(() => {
+    return filteredAndSortedFields.map((field) => {
+      let matchedCategory: string | undefined;
+      let categoryOutOfRange = false;
+      if (field.matchedStandardId) {
+        const std = dataStandards.find((s) => s.id === field.matchedStandardId);
+        if (std) {
+          matchedCategory = std.category;
+          if (hasCategoryFilter && !selectedCategoryLeafNames.has(std.category)) {
+            categoryOutOfRange = true;
+          }
+        }
+      }
+      return { field, matchedCategory, categoryOutOfRange };
+    });
+  }, [filteredAndSortedFields, dataStandards, hasCategoryFilter, selectedCategoryLeafNames]);
+
   const selectedField = useMemo(() => {
     return dataFields.find((f) => f.id === selectedFieldId) ?? null;
   }, [dataFields, selectedFieldId]);
 
   const candidateStandards = useMemo(() => {
     if (!selectedField) return [];
-    return [...dataStandards]
+    let standards = [...dataStandards];
+    if (hasCategoryFilter) {
+      standards = standards.filter((std) => selectedCategoryLeafNames.has(std.category));
+    }
+    return standards
       .map((std) => {
         let score = 0;
         const fieldName = selectedField.fieldName.toLowerCase();
@@ -247,12 +304,44 @@ export default function Matching() {
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
-  }, [selectedField, dataStandards]);
+  }, [selectedField, dataStandards, hasCategoryFilter, selectedCategoryLeafNames]);
 
   const matchedStandard = useMemo(() => {
     if (!selectedField?.matchedStandardId) return null;
     return dataStandards.find((s) => s.id === selectedField.matchedStandardId) ?? null;
   }, [selectedField, dataStandards]);
+
+  const matchedStandardOutOfRange = useMemo(() => {
+    if (!matchedStandard || !hasCategoryFilter) return false;
+    return !selectedCategoryLeafNames.has(matchedStandard.category);
+  }, [matchedStandard, hasCategoryFilter, selectedCategoryLeafNames]);
+
+  useEffect(() => {
+    if (taskFields.length === 0 && checkTasks.length > 0) {
+      const taskWithFields = checkTasks.find(
+        (task) => dataFields.filter((f) => f.taskId === task.id).length > 0,
+      );
+      if (taskWithFields && taskWithFields.id !== currentTaskId) {
+        setCurrentTaskId(taskWithFields.id);
+      }
+    }
+  }, [taskFields.length, checkTasks, dataFields, currentTaskId, setCurrentTaskId]);
+
+  useEffect(() => {
+    if (selectedFieldId === null && taskFields.length > 0) {
+      setSelectedFieldId(taskFields[0].id);
+    }
+  }, [selectedFieldId, taskFields]);
+
+  const handleTaskChange = (taskId: string) => {
+    setCurrentTaskId(taskId);
+    const newTaskFields = dataFields.filter((f) => f.taskId === taskId);
+    if (newTaskFields.length > 0) {
+      setSelectedFieldId(newTaskFields[0].id);
+    } else {
+      setSelectedFieldId(null);
+    }
+  };
 
   const handleToggleExpand = useCallback((id: string) => {
     setExpandedIds((prev) => {
@@ -346,9 +435,32 @@ export default function Matching() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">字段匹配</h1>
-          <p className="text-gray-500 mt-1">将数据字段与标准数据元进行智能匹配与映射</p>
+        <div className="flex items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-gray-800">字段匹配</h1>
+              {currentTask && (
+                <span className="text-sm px-3 py-1 bg-primary-100 text-primary-800 rounded-full font-medium">
+                  {currentTask.name}
+                </span>
+              )}
+            </div>
+            <p className="text-gray-500 mt-1">将数据字段与标准数据元进行智能匹配与映射</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-gray-600">任务：</label>
+            <select
+              value={currentTaskId}
+              onChange={(e) => handleTaskChange(e.target.value)}
+              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 bg-white min-w-[200px]"
+            >
+              {checkTasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-lg">
@@ -544,18 +656,24 @@ export default function Matching() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filteredAndSortedFields.map((field, idx) => (
+                  {fieldsWithCategoryInfo.map(({ field, categoryOutOfRange }, idx) => (
                     <tr
                       key={field.id}
                       className={clsx(
                         'cursor-pointer transition-colors duration-150',
                         idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30',
                         selectedFieldId === field.id ? 'bg-primary-50 hover:bg-primary-50' : 'hover:bg-primary-50/50',
+                        categoryOutOfRange && 'bg-amber-50/50',
                       )}
                       onClick={() => setSelectedFieldId(field.id)}
                     >
                       <td className="px-4 py-3">
-                        <span className="text-sm font-mono text-primary-800 font-medium">{field.fieldName}</span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-mono text-primary-800 font-medium">{field.fieldName}</span>
+                          {categoryOutOfRange && (
+                            <span className="text-xs text-amber-600 mt-0.5">⚠ 匹配标准不在所选范围内</span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded font-mono">
@@ -600,7 +718,7 @@ export default function Matching() {
                   ))}
                 </tbody>
               </table>
-              {filteredAndSortedFields.length === 0 && (
+              {fieldsWithCategoryInfo.length === 0 && (
                 <div className="py-16 text-center">
                   <div className="w-16 h-16 mx-auto rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mb-4">
                     <Search className="w-8 h-8" />
@@ -662,21 +780,72 @@ export default function Matching() {
                   </div>
 
                   {matchedStandard && (
-                    <div className="bg-green-50 rounded-xl border border-green-200 p-4">
+                    <div
+                      className={clsx(
+                        'rounded-xl border p-4',
+                        matchedStandardOutOfRange
+                          ? 'bg-amber-50 border-amber-200'
+                          : 'bg-green-50 border-green-200',
+                      )}
+                    >
                       <div className="flex items-center gap-2 mb-3">
-                        <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center text-white">
-                          <Check className="w-4 h-4" />
+                        <div
+                          className={clsx(
+                            'w-6 h-6 rounded-full flex items-center justify-center text-white',
+                            matchedStandardOutOfRange ? 'bg-amber-500' : 'bg-green-500',
+                          )}
+                        >
+                          {matchedStandardOutOfRange ? (
+                            <span className="text-xs">!</span>
+                          ) : (
+                            <Check className="w-4 h-4" />
+                          )}
                         </div>
-                        <h3 className="font-semibold text-green-800 text-sm">已关联标准</h3>
+                        <h3
+                          className={clsx(
+                            'font-semibold text-sm',
+                            matchedStandardOutOfRange ? 'text-amber-800' : 'text-green-800',
+                          )}
+                        >
+                          {matchedStandardOutOfRange ? '已关联标准（不在所选范围）' : '已关联标准'}
+                        </h3>
                       </div>
                       <div className="space-y-2">
                         <div className="flex justify-between">
-                          <span className="text-xs text-green-700">标准字段名</span>
-                          <span className="text-sm font-mono font-medium text-green-800">{matchedStandard.standardFieldName}</span>
+                          <span
+                            className={clsx(
+                              'text-xs',
+                              matchedStandardOutOfRange ? 'text-amber-700' : 'text-green-700',
+                            )}
+                          >
+                            标准字段名
+                          </span>
+                          <span
+                            className={clsx(
+                              'text-sm font-mono font-medium',
+                              matchedStandardOutOfRange ? 'text-amber-800' : 'text-green-800',
+                            )}
+                          >
+                            {matchedStandard.standardFieldName}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-xs text-green-700">标准名称</span>
-                          <span className="text-sm font-medium text-green-800">{matchedStandard.standardName}</span>
+                          <span
+                            className={clsx(
+                              'text-xs',
+                              matchedStandardOutOfRange ? 'text-amber-700' : 'text-green-700',
+                            )}
+                          >
+                            标准名称
+                          </span>
+                          <span
+                            className={clsx(
+                              'text-sm font-medium',
+                              matchedStandardOutOfRange ? 'text-amber-800' : 'text-green-800',
+                            )}
+                          >
+                            {matchedStandard.standardName}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -685,21 +854,22 @@ export default function Matching() {
                   <div className="bg-white rounded-xl border border-gray-200 p-4">
                     <h3 className="font-semibold text-gray-800 text-sm mb-3">疑似匹配标准项</h3>
                     <div className="space-y-2">
-                      {candidateStandards.map(({ standard, score }) => (
-                        <div
-                          key={standard.id}
-                          className={clsx(
-                            'p-3 rounded-lg border-2 cursor-pointer transition-all duration-200',
-                            selectedField.matchedStandardId === standard.id
-                              ? 'border-primary-500 bg-primary-50'
-                              : 'border-gray-100 hover:border-primary-300 hover:bg-primary-50/50',
-                          )}
-                          onClick={() => {
-                            if (selectedField.matchedStandardId !== standard.id) {
-                              confirmFieldMatch(selectedField.id, true);
-                            }
-                          }}
-                        >
+                      {candidateStandards.length > 0 ? (
+                        candidateStandards.map(({ standard, score }) => (
+                          <div
+                            key={standard.id}
+                            className={clsx(
+                              'p-3 rounded-lg border-2 cursor-pointer transition-all duration-200',
+                              selectedField.matchedStandardId === standard.id
+                                ? 'border-primary-500 bg-primary-50'
+                                : 'border-gray-100 hover:border-primary-300 hover:bg-primary-50/50',
+                            )}
+                            onClick={() => {
+                              if (selectedField.matchedStandardId !== standard.id) {
+                                confirmFieldMatch(selectedField.id, true, standard.id);
+                              }
+                            }}
+                          >
                           <div className="flex items-start justify-between gap-3">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-1">
@@ -718,7 +888,12 @@ export default function Matching() {
                             </div>
                           </div>
                         </div>
-                      ))}
+                      ))
+                    ) : (
+                      <div className="py-8 text-center">
+                        <p className="text-sm text-gray-500">所选范围内暂无匹配的标准项</p>
+                      </div>
+                    )}
                     </div>
                   </div>
 
