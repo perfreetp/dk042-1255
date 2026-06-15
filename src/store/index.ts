@@ -17,6 +17,95 @@ import {
   mockStandardCategories,
 } from '@/data/mockData';
 
+const randomFieldNames = [
+  'cust_name', 'cust_id', 'order_no', 'order_amount', 'order_status',
+  'product_name', 'product_id', 'unit_price', 'quantity', 'discount_amount',
+  'create_time', 'update_time', 'creator', 'updater', 'is_deleted',
+  'mobile', 'email', 'address', 'gender', 'birthday',
+  'pay_type', 'pay_amount', 'pay_time', 'refund_amount', 'refund_time',
+  'category_id', 'category_name', 'brand_id', 'brand_name', 'stock_qty',
+  'user_id', 'user_name', 'nick_name', 'avatar_url', 'user_level',
+  'dept_id', 'dept_name', 'emp_id', 'emp_name', 'position',
+  'account_no', 'account_name', 'balance', 'credit_limit', 'currency',
+  'log_id', 'op_type', 'op_time', 'op_user', 'ip_address',
+];
+
+const randomTableNames = [
+  't_customer', 't_order', 't_order_detail', 't_product', 't_category',
+  't_user', 't_department', 't_employee', 't_payment', 't_refund',
+  't_account', 't_stock', 't_brand', 't_log', 't_address',
+];
+
+const randomFieldTypes = [
+  'varchar(32)', 'varchar(64)', 'varchar(100)', 'varchar(200)', 'varchar(500)',
+  'int', 'bigint', 'decimal(18,2)', 'decimal(10,2)',
+  'datetime', 'date', 'timestamp',
+  'tinyint', 'char(1)', 'char(10)',
+  'text', 'longtext',
+];
+
+const randomSampleValues = [
+  '张三', '1001', 'ORD20260615001', '99.99', '1',
+  '2026-06-15 10:30:00', 'admin', '13800138000', 'test@example.com',
+  '北京市朝阳区', 'MALE', '1990-01-01', 'ALIPAY', '500.00',
+  '电子产品', '苹果', '100', 'VIP', '技术部',
+  '经理', '622202xxxx', '10000.00', 'CNY', 'login',
+];
+
+function generateMockFields(
+  taskId: string,
+  count: number,
+  standardCategories: string[],
+  dataStandards: DataStandard[],
+  existingFields: DataField[],
+): DataField[] {
+  const fields: DataField[] = [];
+  const startIndex = existingFields.length + 1;
+
+  const preferredStandards = standardCategories.length > 0
+    ? dataStandards.filter((s) => standardCategories.includes(s.category))
+    : dataStandards;
+  const otherStandards = standardCategories.length > 0
+    ? dataStandards.filter((s) => !standardCategories.includes(s.category))
+    : [];
+
+  for (let i = 0; i < count; i++) {
+    const idx = startIndex + i;
+    const usePreferred = preferredStandards.length > 0 && Math.random() > 0.2;
+    const standardsPool = usePreferred ? preferredStandards : otherStandards.length > 0 ? otherStandards : dataStandards;
+    const matchedStandard = standardsPool.length > 0
+      ? standardsPool[Math.floor(Math.random() * standardsPool.length)]
+      : undefined;
+
+    const fieldName = randomFieldNames[Math.floor(Math.random() * randomFieldNames.length)]
+      + (Math.random() > 0.7 ? `_${i}` : '');
+    const fieldType = randomFieldTypes[Math.floor(Math.random() * randomFieldTypes.length)];
+    const tableName = randomTableNames[Math.floor(Math.random() * randomTableNames.length)];
+    const sampleValue = randomSampleValues[Math.floor(Math.random() * randomSampleValues.length)];
+    const matchScore = Math.floor(Math.random() * 40) + 60;
+
+    let description = matchedStandard?.description ?? '';
+    if (!description) {
+      description = `${fieldName}字段`;
+    }
+
+    fields.push({
+      id: `field-${idx.toString().padStart(3, '0')}`,
+      taskId,
+      fieldName,
+      fieldType,
+      description,
+      matchedStandardId: matchedStandard?.id,
+      matchScore,
+      matchStatus: 'pending',
+      tableName,
+      sampleValue,
+    });
+  }
+
+  return fields;
+}
+
 interface AppState {
   checkTasks: CheckTask[];
   dataFields: DataField[];
@@ -203,7 +292,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     }),
 
   addCheckTask: (task) => {
+    const state = get();
     const newId = `task-${Date.now()}`;
+    const fieldCount = Math.max(task.totalFields ?? 0, 10);
+    const standardCategories = task.standardCategories ?? [];
     const newTask: CheckTask = {
       id: newId,
       name: task.name,
@@ -211,13 +303,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       status: task.status ?? 'pending',
       createdAt: new Date().toISOString().split('T')[0],
       progress: 0,
-      totalFields: task.totalFields ?? 0,
+      totalFields: fieldCount,
       issueCount: 0,
-      standardCategories: task.standardCategories ?? [],
+      standardCategories,
       description: task.description,
     };
-    set((state) => ({
-      checkTasks: [newTask, ...state.checkTasks],
+    const mockFields = generateMockFields(newId, fieldCount, standardCategories, state.dataStandards, state.dataFields);
+    set((s) => ({
+      checkTasks: [newTask, ...s.checkTasks],
+      dataFields: [...s.dataFields, ...mockFields],
       currentTaskId: newId,
     }));
     return newId;

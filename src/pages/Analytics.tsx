@@ -1,4 +1,6 @@
 import { useState, useMemo } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
   LineChart,
   Line,
@@ -181,7 +183,6 @@ export default function Analytics() {
     rectificationTasks,
     currentTaskId,
     dataFields,
-    dataStandards,
   } = useAppStore();
   const [timeRange, setTimeRange] = useState<TimeRange>('30d');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -191,10 +192,29 @@ export default function Analytics() {
   const [exportFormat, setExportFormat] = useState<'excel' | 'csv' | 'pdf'>('excel');
   const [isExporting, setIsExporting] = useState(false);
 
-  const totalFields = 446;
-  const totalIssues = 46;
-  const complianceRate = 78.5;
-  const rectificationRate = 73.9;
+  const totalFields = useMemo(() => {
+    return checkTasks.reduce((sum, task) => sum + task.totalFields, 0);
+  }, [checkTasks]);
+
+  const totalIssues = useMemo(() => {
+    return issues.length;
+  }, [issues]);
+
+  const complianceRate = useMemo(() => {
+    if (totalFields === 0) return 0;
+    const uniqueFieldIds = new Set(issues.map((issue) => issue.fieldId));
+    const problematicFields = uniqueFieldIds.size;
+    const rate = ((totalFields - problematicFields) / totalFields) * 100;
+    return parseFloat(rate.toFixed(1));
+  }, [totalFields, issues]);
+
+  const rectificationRate = useMemo(() => {
+    if (totalIssues === 0) return 0;
+    const resolvedCount = issues.filter((issue) => issue.status === 'resolved').length;
+    const rate = (resolvedCount / totalIssues) * 100;
+    return parseFloat(rate.toFixed(1));
+  }, [totalIssues, issues]);
+
   const fieldsYoY = 12.5;
   const issuesYoY = -8.3;
 
@@ -270,48 +290,49 @@ export default function Analytics() {
   const handleExport = () => {
     setIsExporting(true);
 
-    const dateStr = formatDateForFilename();
+    try {
+      const dateStr = formatDateForFilename();
 
-    const filteredIssues: Issue[] = exportScope === 'all'
-      ? [...issues]
-      : issues.filter((issue) => issue.taskId === currentTaskId);
+      const filteredIssues: Issue[] = exportScope === 'all'
+        ? [...issues]
+        : issues.filter((issue) => issue.taskId === currentTaskId);
 
-    const taskMap = new Map(checkTasks.map((t) => [t.id, t]));
-    const fieldMap = new Map(dataFields.map((f) => [f.id, f]));
+      const taskMap = new Map(checkTasks.map((t) => [t.id, t]));
+      const fieldMap = new Map(dataFields.map((f) => [f.id, f]));
 
-    const rows: ExportRow[] = filteredIssues.map((issue) => {
-      const task = taskMap.get(issue.taskId);
-      const field = fieldMap.get(issue.fieldId);
-      return {
-        taskName: task?.name ?? '-',
-        projectName: task?.projectName ?? '-',
-        fieldName: issue.fieldName ?? '-',
-        tableName: issue.tableName ?? field?.tableName ?? '-',
-        issueType: ISSUE_TYPE_LABELS[issue.type] ?? issue.type,
-        severity: SEVERITY_LABELS[issue.severity] ?? issue.severity,
-        description: issue.description ?? '-',
-        suggestion: issue.suggestion ?? '-',
-        standardName: issue.standardName ?? '-',
-        status: STATUS_LABELS[issue.status] ?? issue.status,
-        createdAt: issue.createdAt ?? '-',
-      };
-    });
+      const rows: ExportRow[] = filteredIssues.map((issue) => {
+        const task = taskMap.get(issue.taskId);
+        const field = fieldMap.get(issue.fieldId);
+        return {
+          taskName: task?.name ?? '-',
+          projectName: task?.projectName ?? '-',
+          fieldName: issue.fieldName ?? '-',
+          tableName: issue.tableName ?? field?.tableName ?? '-',
+          issueType: ISSUE_TYPE_LABELS[issue.type] ?? issue.type,
+          severity: SEVERITY_LABELS[issue.severity] ?? issue.severity,
+          description: issue.description ?? '-',
+          suggestion: issue.suggestion ?? '-',
+          standardName: issue.standardName ?? '-',
+          status: STATUS_LABELS[issue.status] ?? issue.status,
+          createdAt: issue.createdAt ?? '-',
+        };
+      });
 
-    const headers = [
-      '检查任务',
-      '所属项目',
-      '字段名',
-      '所属表',
-      '问题类型',
-      '严重程度',
-      '问题描述',
-      '整改建议',
-      '对应标准',
-      '状态',
-      '创建时间',
-    ];
+      const headers = [
+        '检查任务',
+        '所属项目',
+        '字段名',
+        '所属表',
+        '问题类型',
+        '严重程度',
+        '问题描述',
+        '整改建议',
+        '对应标准',
+        '状态',
+        '创建时间',
+      ];
 
-    if (exportFormat === 'excel') {
+      if (exportFormat === 'excel') {
       let html =
         '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
         'xmlns:x="urn:schemas-microsoft-com:office:excel" ' +
@@ -327,7 +348,7 @@ export default function Analytics() {
         'tr:nth-child(even) td { background-color: #f5f9ff; }' +
         '</style></head><body>' +
         '<h2 style="color:#1e3a5f;">数据标准检查明细</h2>' +
-        `<p style="color:#666;">导出时间：${new Date().toLocaleString()}　导出范围：${exportScope === 'all' ? '全部数据' : '当前项目'}　共 ${rows.length} 条记录</p>` +
+        `<p style="color:#666;">导出时间：${new Date().toLocaleString()} 导出范围：${exportScope === 'all' ? '全部数据' : '当前项目'} 共 ${rows.length} 条记录</p>` +
         '<table><thead><tr>';
       headers.forEach((h) => {
         html += `<th>${escapeHtml(h)}</th>`;
@@ -372,87 +393,106 @@ export default function Analytics() {
       const csvContent = '\uFEFF' + csvLines.join('\r\n');
       downloadBlob(csvContent, `数据标准检查明细_${dateStr}.csv`, 'text/csv;charset=utf-8');
     } else {
-      let html =
-        '<!DOCTYPE html>' +
-        '<html lang="zh-CN"><head><meta charset="UTF-8"/>' +
-        '<title>数据标准检查明细</title>' +
-        '<style>' +
-        '* { box-sizing: border-box; margin: 0; padding: 0; }' +
-        'body { font-family: "Microsoft YaHei", Arial, sans-serif; padding: 40px; color: #333; background: #fff; }' +
-        '.header { margin-bottom: 30px; border-bottom: 2px solid #2d79c1; padding-bottom: 20px; }' +
-        '.header h1 { color: #1e3a5f; font-size: 24px; margin-bottom: 10px; }' +
-        '.header .meta { color: #666; font-size: 14px; line-height: 1.8; }' +
-        '.summary { display: flex; gap: 20px; margin-bottom: 30px; }' +
-        '.summary-card { flex: 1; padding: 16px 20px; background: #f5f9ff; border-radius: 8px; border-left: 4px solid #2d79c1; }' +
-        '.summary-card .label { color: #666; font-size: 13px; margin-bottom: 6px; }' +
-        '.summary-card .value { color: #1e3a5f; font-size: 22px; font-weight: bold; }' +
-        'table { width: 100%; border-collapse: collapse; margin-top: 10px; }' +
-        'th, td { border: 1px solid #d0d7de; padding: 10px 12px; font-size: 13px; text-align: left; vertical-align: top; }' +
-        'th { background: linear-gradient(135deg, #1e3a5f, #2d79c1); color: #fff; font-weight: 600; }' +
-        'tbody tr:nth-child(even) { background: #f8fafc; }' +
-        'tbody tr:hover { background: #eef6ff; }' +
-        '.severity-high { color: #dc2626; font-weight: 600; }' +
-        '.severity-medium { color: #d97706; font-weight: 600; }' +
-        '.severity-low { color: #16a34a; font-weight: 600; }' +
-        '.status-open { color: #dc2626; }' +
-        '.status-rectifying { color: #d97706; }' +
-        '.status-resolved { color: #16a34a; }' +
-        '.status-falsepositive { color: #6b7280; }' +
-        '.tip { margin-top: 30px; padding: 14px 18px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; color: #92400e; font-size: 13px; }' +
-        '.tip strong { color: #78350f; }' +
-        'footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px; text-align: center; }' +
-        '@media print { body { padding: 20px; } .no-print { display: none; } }' +
-        '</style></head><body>' +
-        '<div class="no-print" style="margin-bottom:20px;">' +
-        '<button onclick="window.print()" style="padding:10px 20px;background:#2d79c1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px;">🖨️ 打印 / 导出为 PDF</button>' +
-        '</div>' +
-        '<div class="header">' +
-        '<h1>📋 数据标准检查明细报告</h1>' +
-        '<div class="meta">' +
-        `<div>导出时间：${new Date().toLocaleString()}</div>` +
-        `<div>导出范围：${exportScope === 'all' ? '全部任务数据' : '当前选中任务'}</div>` +
-        '</div></div>' +
-        '<div class="summary">' +
-        `<div class="summary-card"><div class="label">问题总数</div><div class="value">${rows.length}</div></div>` +
-        `<div class="summary-card"><div class="label">严重问题</div><div class="value" style="color:#dc2626;">${rows.filter((r) => r.severity === '严重').length}</div></div>` +
-        `<div class="summary-card"><div class="label">已解决</div><div class="value" style="color:#16a34a;">${rows.filter((r) => r.status === '已解决').length}</div></div>` +
-        `<div class="summary-card"><div class="label">待处理</div><div class="value" style="color:#d97706;">${rows.filter((r) => r.status === '待处理').length}</div></div>` +
-        '</div>' +
-        '<h3 style="color:#1e3a5f;margin-bottom:12px;">详细检查结果</h3>' +
-        '<table><thead><tr>';
-      headers.forEach((h) => {
-        html += `<th>${escapeHtml(h)}</th>`;
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4',
       });
-      html += '</tr></thead><tbody>';
-      rows.forEach((row) => {
-        const sevClass =
-          row.severity === '严重' ? 'severity-high' :
-          row.severity === '中等' ? 'severity-medium' : 'severity-low';
-        const staClass =
-          row.status === '待处理' ? 'status-open' :
-          row.status === '整改中' ? 'status-rectifying' :
-          row.status === '已解决' ? 'status-resolved' : 'status-falsepositive';
-        html += '<tr>';
-        html += `<td>${escapeHtml(row.taskName)}</td>`;
-        html += `<td>${escapeHtml(row.projectName)}</td>`;
-        html += `<td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(row.fieldName)}</code></td>`;
-        html += `<td>${escapeHtml(row.tableName)}</td>`;
-        html += `<td>${escapeHtml(row.issueType)}</td>`;
-        html += `<td class="${sevClass}">${escapeHtml(row.severity)}</td>`;
-        html += `<td>${escapeHtml(row.description)}</td>`;
-        html += `<td>${escapeHtml(row.suggestion)}</td>`;
-        html += `<td>${escapeHtml(row.standardName)}</td>`;
-        html += `<td class="${staClass}">${escapeHtml(row.status)}</td>`;
-        html += `<td>${escapeHtml(row.createdAt)}</td>`;
-        html += '</tr>';
+
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Data Standard Check Detail Report', 14, 20);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Export Time: ${new Date().toLocaleString()}`, 14, 30);
+      doc.text(`Export Scope: ${exportScope === 'all' ? 'All Tasks' : 'Current Task'}`, 14, 36);
+      doc.text(`Records: ${rows.length}`, 14, 42);
+
+      const highCount = rows.filter((r) => r.severity === '严重').length;
+      const resolvedCount = rows.filter((r) => r.status === '已解决').length;
+      const openCount = rows.filter((r) => r.status === '待处理').length;
+
+      const summaryY = 50;
+      const cardWidth = 65;
+      const cardHeight = 22;
+      const cardGap = 10;
+      const startX = 14;
+
+      const summaryItems = [
+        { label: 'Total Issues', value: rows.length, color: '#1e3a5f' },
+        { label: 'High Severity', value: highCount, color: '#dc2626' },
+        { label: 'Resolved', value: resolvedCount, color: '#16a34a' },
+        { label: 'Pending', value: openCount, color: '#d97706' },
+      ];
+
+      summaryItems.forEach((item, index) => {
+        const x = startX + index * (cardWidth + cardGap);
+        doc.setFillColor(245, 249, 255);
+        doc.roundedRect(x, summaryY, cardWidth, cardHeight, 3, 3, 'F');
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(102, 102, 102);
+        doc.text(item.label, x + 5, summaryY + 8);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(item.color);
+        doc.text(String(item.value), x + 5, summaryY + 17);
       });
-      html += '</tbody></table>' +
-        '<div class="tip">' +
-        '<strong>💡 提示：</strong>请点击上方"打印 / 导出为 PDF"按钮，在打印对话框中选择"另存为 PDF"，即可生成 PDF 格式文件。' +
-        '</div>' +
-        `<footer>数据标准管理平台 · 自动生成于 ${new Date().toLocaleString()} · 共 ${rows.length} 条记录</footer>` +
-        '</body></html>';
-      downloadBlob(html, `数据标准检查明细_${dateStr}.html`, 'text/html;charset=utf-8');
+
+      doc.setTextColor(0, 0, 0);
+
+      const pdfHeaders = [
+        'Task',
+        'Project',
+        'Field',
+        'Table',
+        'Type',
+        'Severity',
+        'Description',
+        'Suggestion',
+        'Standard',
+        'Status',
+        'Created',
+      ];
+
+      const pdfRows = rows.map((row) => [
+        row.taskName,
+        row.projectName,
+        row.fieldName,
+        row.tableName,
+        row.issueType,
+        row.severity,
+        row.description,
+        row.suggestion,
+        row.standardName,
+        row.status,
+        row.createdAt,
+      ]);
+
+      autoTable(doc, {
+        head: [pdfHeaders],
+        body: pdfRows,
+        startY: 80,
+        styles: {
+          fontSize: 8,
+          cellPadding: 3,
+        },
+        headStyles: {
+          fillColor: '#1e3a5f',
+          textColor: '#ffffff',
+          fontStyle: 'bold',
+        },
+        alternateRowStyles: {
+          fillColor: '#f5f9ff',
+        },
+        tableWidth: 'auto',
+      });
+
+        doc.save(`数据标准检查明细_${dateStr}.pdf`);
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
     }
 
     setTimeout(() => {

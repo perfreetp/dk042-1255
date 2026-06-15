@@ -202,29 +202,30 @@ export default function Matching() {
     return dataFields.filter((f) => f.taskId === currentTaskId);
   }, [dataFields, currentTaskId]);
 
-  const selectedCategoryLeafNames = useMemo(() => {
-    const leafNames = new Set<string>();
-    const collectLeafNames = (cats: StandardCategory[]) => {
+  const selectedCategoryAllNames = useMemo(() => {
+    const allNames = new Set<string>();
+    const collectAllNames = (cats: StandardCategory[]) => {
       for (const cat of cats) {
         if (selectedCategoryIds.has(cat.id)) {
-          const getLeaves = (c: StandardCategory): string[] => {
-            if (!c.children || c.children.length === 0) {
-              return [c.name];
+          const getAllNames = (c: StandardCategory): string[] => {
+            let names = [c.name];
+            if (c.children && c.children.length > 0) {
+              names = names.concat(c.children.flatMap(getAllNames));
             }
-            return c.children.flatMap(getLeaves);
+            return names;
           };
-          getLeaves(cat).forEach((name) => leafNames.add(name));
+          getAllNames(cat).forEach((name) => allNames.add(name));
         }
         if (cat.children) {
-          collectLeafNames(cat.children);
+          collectAllNames(cat.children);
         }
       }
     };
-    collectLeafNames(standardCategories);
-    return leafNames;
+    collectAllNames(standardCategories);
+    return allNames;
   }, [selectedCategoryIds, standardCategories]);
 
-  const hasCategoryFilter = selectedCategoryLeafNames.size > 0;
+  const hasCategoryFilter = selectedCategoryAllNames.size > 0;
 
   const filteredAndSortedFields = useMemo(() => {
     let fields = [...taskFields];
@@ -261,14 +262,14 @@ export default function Matching() {
         const std = dataStandards.find((s) => s.id === field.matchedStandardId);
         if (std) {
           matchedCategory = std.category;
-          if (hasCategoryFilter && !selectedCategoryLeafNames.has(std.category)) {
+          if (hasCategoryFilter && !selectedCategoryAllNames.has(std.category)) {
             categoryOutOfRange = true;
           }
         }
       }
       return { field, matchedCategory, categoryOutOfRange };
     });
-  }, [filteredAndSortedFields, dataStandards, hasCategoryFilter, selectedCategoryLeafNames]);
+  }, [filteredAndSortedFields, dataStandards, hasCategoryFilter, selectedCategoryAllNames]);
 
   const selectedField = useMemo(() => {
     return dataFields.find((f) => f.id === selectedFieldId) ?? null;
@@ -278,7 +279,7 @@ export default function Matching() {
     if (!selectedField) return [];
     let standards = [...dataStandards];
     if (hasCategoryFilter) {
-      standards = standards.filter((std) => selectedCategoryLeafNames.has(std.category));
+      standards = standards.filter((std) => selectedCategoryAllNames.has(std.category));
     }
     return standards
       .map((std) => {
@@ -304,7 +305,7 @@ export default function Matching() {
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, 5);
-  }, [selectedField, dataStandards, hasCategoryFilter, selectedCategoryLeafNames]);
+  }, [selectedField, dataStandards, hasCategoryFilter, selectedCategoryAllNames]);
 
   const matchedStandard = useMemo(() => {
     if (!selectedField?.matchedStandardId) return null;
@@ -313,8 +314,8 @@ export default function Matching() {
 
   const matchedStandardOutOfRange = useMemo(() => {
     if (!matchedStandard || !hasCategoryFilter) return false;
-    return !selectedCategoryLeafNames.has(matchedStandard.category);
-  }, [matchedStandard, hasCategoryFilter, selectedCategoryLeafNames]);
+    return !selectedCategoryAllNames.has(matchedStandard.category);
+  }, [matchedStandard, hasCategoryFilter, selectedCategoryAllNames]);
 
   useEffect(() => {
     if (taskFields.length === 0 && checkTasks.length > 0) {

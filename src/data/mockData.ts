@@ -205,7 +205,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-001',
     standardName: '客户姓名',
-    category: '客户域',
+    category: '客户基本信息',
     standardFieldName: 'customer_name',
     standardType: 'varchar(100)',
     valueRange: '长度1-100字符',
@@ -215,7 +215,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-002',
     standardName: '订单编号',
-    category: '订单域',
+    category: '订单主信息',
     standardFieldName: 'order_no',
     standardType: 'varchar(32)',
     valueRange: 'ORD+日期(8位)+序号(5位)',
@@ -225,7 +225,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-003',
     standardName: '订单金额',
-    category: '订单域',
+    category: '订单主信息',
     standardFieldName: 'order_amount',
     standardType: 'decimal(18,2)',
     valueRange: '>=0，精度2位小数',
@@ -235,7 +235,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-004',
     standardName: '创建时间',
-    category: '基础公共',
+    category: '公共字段',
     standardFieldName: 'gmt_create',
     standardType: 'datetime',
     valueRange: '合法日期时间',
@@ -245,7 +245,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-005',
     standardName: '订单状态',
-    category: '订单域',
+    category: '订单状态',
     standardFieldName: 'order_status',
     standardType: 'varchar(10)',
     valueRange: 'CREATED/PAID/SHIPPED/COMPLETED/CANCELLED',
@@ -255,7 +255,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-006',
     standardName: '支付方式',
-    category: '交易域',
+    category: '支付信息',
     standardFieldName: 'payment_method',
     standardType: 'varchar(20)',
     valueRange: 'ALIPAY/WECHAT/BANK/CASH',
@@ -265,7 +265,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-007',
     standardName: '商品名称',
-    category: '产品域',
+    category: '商品信息',
     standardFieldName: 'product_name',
     standardType: 'varchar(200)',
     valueRange: '长度1-200字符',
@@ -275,7 +275,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-008',
     standardName: '购买数量',
-    category: '订单域',
+    category: '订单明细',
     standardFieldName: 'quantity',
     standardType: 'int',
     valueRange: '正整数，最大9999',
@@ -285,7 +285,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-009',
     standardName: '单价',
-    category: '产品域',
+    category: '商品价格',
     standardFieldName: 'unit_price',
     standardType: 'decimal(18,2)',
     valueRange: '>=0，精度2位小数',
@@ -295,7 +295,7 @@ export const mockDataStandards: DataStandard[] = [
   {
     id: 'std-010',
     standardName: '优惠金额',
-    category: '交易域',
+    category: '优惠活动',
     standardFieldName: 'discount_amount',
     standardType: 'decimal(18,2)',
     valueRange: '>=0，精度2位小数',
